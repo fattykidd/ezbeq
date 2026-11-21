@@ -7,5 +7,6 @@ devices:
     - Sub 1
     - Sub 2
     minFrequency: 5
+    autoclear: true
     type: hyperion
 port: 8080

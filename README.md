@@ -705,6 +705,7 @@ AudioControl Hyperion APR-16 processors are supported via the processor's REST A
     - Sub 1
     - Sub 2
     minFrequency: 5
+    autoclear: true
     type: hyperion
 ```
 
@@ -723,6 +724,9 @@ AudioControl Hyperion APR-16 processors are supported via the processor's REST A
 * maxFitError: optional, defaults to 1.5. An entry is refused, leaving the processor untouched, if it cannot be
   reproduced within this many dB.
 * timeout: optional, defaults to 10. Request timeout in seconds.
+* autoclear: optional, defaults to false. If set to true, BEQ filters are cleared whenever the Hyperion's power state
+  or active input changes, so a film's BEQ never carries over to the next thing played.
+* autoclearInterval: optional, defaults to 5. How often, in seconds, the Hyperion is checked for those changes.
 
 Each Hyperion speaker has a single low shelf and up to 14 peaking bands, while many BEQ entries stack several low
 shelves at different frequencies. ezbeq therefore does not copy an entry filter by filter: it fits the entry's combined

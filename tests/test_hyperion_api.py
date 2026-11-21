@@ -1,19 +1,29 @@
 import json
 import os
+import time
 
 import pytest
+import requests
 import yaml
-from conftest import HyperionSpyConfig
+from conftest import CapturingWsServer, HyperionSpyConfig
 from werkzeug import Response
 
 from ezbeq import main, peqfit
+from ezbeq.catalogue import CatalogueEntry
 from ezbeq.hyperion import (
     DEFAULT_PEAK_BANDS,
     SLOT_ID,
     BandConfig,
     Hyperion,
+    HyperionError,
+    StateWatcher,
     resolve_url,
 )
+
+ENTRY = CatalogueEntry('manual', {
+    'title': 'Manual',
+    'filters': [{'type': 'LowShelf', 'freq': 20.0, 'gain': 6.0, 'q': 0.7}],
+})
 
 SPEAKERS = [
     {'id': 4, 'speaker': 'Sub 1', 'type': 'SW', 'customName': ''},
@@ -249,6 +259,124 @@ def test_example_config_creates_a_device(tmp_path):
     assert device.device_type == 'hyperion'
 
 
+class FakeState:
+    """
+    A Hyperion whose power state and active input the test controls, or makes unreachable.
+    """
+
+    def __init__(self):
+        self.power = '1'
+        self.input_id = 1
+        self.reachable = True
+
+    def power_on(self) -> bool:
+        self.__check()
+        return self.power == '1'
+
+    def active_input(self) -> str:
+        self.__check()
+        return str(self.input_id)
+
+    def __check(self):
+        if not self.reachable:
+            raise requests.ConnectionError('unreachable')
+
+
+def test_watcher_reports_power_and_input_changes():
+    state = FakeState()
+    changes = []
+    watcher = StateWatcher(state, 1.0, changes.append)
+
+    watcher.poll()
+    assert changes == [], 'the first reading only sets the baseline'
+
+    state.power = '0'
+    watcher.poll()
+    state.input_id = 2
+    watcher.poll()
+    watcher.poll()
+
+    assert changes == ['power state', 'active input']
+
+
+def test_watcher_reports_a_change_made_while_unreachable():
+    state = FakeState()
+    changes = []
+    watcher = StateWatcher(state, 1.0, changes.append)
+    watcher.poll()
+
+    state.reachable = False
+    with pytest.raises(requests.ConnectionError):
+        watcher.poll()
+    state.power = '0'
+    state.input_id = 2
+    state.reachable = True
+    watcher.poll()
+
+    assert changes == ['power state and active input']
+
+
+def test_autoclear_clears_loaded_beq_when_the_hyperion_powers_off(httpserver, tmp_path):
+    writes = expect_band_writes(httpserver)
+    current = expect_state(httpserver)
+    device = make_autoclear_device(httpserver, tmp_path)
+    try:
+        device.load_filter(SLOT_ID, ENTRY)
+        assert wait_for(lambda: device.state().slot.last == 'Manual')
+        writes.clear()
+
+        current['state'] = '0'
+
+        assert wait_for(lambda: device.state().slot.last == 'Empty')
+        assert writes and all(w['gain'] == 0.0 for w in writes)
+    finally:
+        device.stop()
+
+
+def test_autoclear_clears_loaded_beq_when_the_input_changes(httpserver, tmp_path):
+    expect_band_writes(httpserver)
+    current = expect_state(httpserver)
+    device = make_autoclear_device(httpserver, tmp_path)
+    try:
+        device.load_filter(SLOT_ID, ENTRY)
+        time.sleep(0.2)
+
+        current['inputId'] = 2
+
+        assert wait_for(lambda: device.state().slot.last == 'Empty')
+    finally:
+        device.stop()
+
+
+def test_autoclear_leaves_an_empty_slot_alone(httpserver, tmp_path):
+    writes = expect_band_writes(httpserver)
+    current = expect_state(httpserver)
+    device = make_autoclear_device(httpserver, tmp_path)
+    try:
+        time.sleep(0.2)
+        current['state'] = '0'
+        time.sleep(0.3)
+
+        assert writes == []
+    finally:
+        device.stop()
+
+
+def test_active_input_must_be_reported(httpserver, tmp_path):
+    httpserver.expect_request('/api/atlas/input/active', method='GET').respond_with_json({'active': True})
+    from ezbeq.hyperion import HyperionApi
+    api = HyperionApi(f'http://{httpserver.host}:{httpserver.port}', 5)
+
+    with pytest.raises(HyperionError, match='active input'):
+        api.active_input()
+
+
+def test_rejects_bad_autoclear_interval(httpserver, tmp_path):
+    with pytest.raises(ValueError, match='autoclearInterval'):
+        main.create_app(HyperionSpyConfig(httpserver.host, httpserver.port, tmp_path,
+                                          autoclear=True, autoclearInterval=0))
+
+
 def load(client):
     return client.put(f"/api/1/devices/master/filter/{SLOT_ID}",
                       data=json.dumps({'entryId': '123456_0'}),
@@ -279,3 +407,35 @@ def expect_band_writes(httpserver) -> list[dict]:
 def as_filter(write: dict) -> peqfit.Filter:
     kind = peqfit.LOW_SHELF if write['eqId'] == 1 else peqfit.PEAKING
     return peqfit.Filter(kind, write['frequency'], write['gain'], write['q'])
+
+
+def expect_state(httpserver) -> dict:
+    """
+    Acts as the Hyperion's power and active input endpoints; the returned dict changes what they report.
+    """
+    current = {'state': '1', 'inputId': 1}
+    httpserver.expect_request('/v1/power', method='GET').respond_with_handler(
+        lambda _: Response(json.dumps({'state': current['state']}), content_type='application/json'))
+    httpserver.expect_request('/api/atlas/input/active', method='GET').respond_with_handler(
+        lambda _: Response(json.dumps({'inputId': current['inputId'], 'input': 'HDMI 1'}),
+                           content_type='application/json'))
+    return current
+
+
+def wait_for(condition, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def make_autoclear_device(httpserver, tmp_path) -> Hyperion:
+    cfg = {
+        'url': f'http://{httpserver.host}:{httpserver.port}',
+        'speakers': [4],
+        'autoclear': True,
+        'autoclearInterval': 0.05,
+    }
+    return Hyperion('master', str(tmp_path), cfg, CapturingWsServer(), None)

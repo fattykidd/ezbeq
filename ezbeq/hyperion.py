@@ -7,6 +7,8 @@ entry's response is fitted onto the bands ezbeq is allowed to use (see ezbeq.peq
 speaker through the Hyperion's REST API.
 """
 import logging
+import threading
+from collections.abc import Callable
 
 import requests
 
@@ -78,6 +80,14 @@ class Hyperion(PersistentDevice[HyperionState]):
             raise ValueError('Hyperion requires at least one entry in speakers')
         if not 1.0 <= self.__layout.min_freq <= 100.0:
             raise ValueError('Hyperion minFrequency must be between 1 and 100 Hz')
+        self.__watcher: StateWatcher | None = None
+        if cfg.get('autoclear', False):
+            interval = float(cfg.get('autoclearInterval', 5.0))
+            if interval <= 0:
+                raise ValueError('Hyperion autoclearInterval must be greater than 0')
+            watcher_api = HyperionApi(resolve_url(cfg), float(cfg.get('timeout', 10.0)))
+            self.__watcher = StateWatcher(watcher_api, interval, self.__on_state_change)
+            self.__watcher.start()
 
     def _load_initial_state(self) -> HyperionState:
         return HyperionState(self.name)
@@ -159,6 +169,23 @@ class Hyperion(PersistentDevice[HyperionState]):
         else:
             self._current_state.slot.clear()
 
+    def __on_state_change(self, reason: str) -> None:
+        if self.state().slot.last == 'Empty':
+            logger.debug(f'Hyperion {reason} changed, no BEQ loaded')
+            return
+        logger.info(f'Clearing BEQ as the Hyperion {reason} changed')
+        try:
+            self.clear_filter(SLOT_ID)
+        except Exception:
+            logger.exception('Unable to clear BEQ from the Hyperion')
+
+    def stop(self) -> None:
+        """
+        Stops watching the Hyperion, if autoclear is enabled.
+        """
+        if self.__watcher:
+            self.__watcher.stop()
+
     def load_biquads(self, slot: str, overwrite: bool, inputs: list[int], outputs: list[int],
                      biquads: list[dict]) -> None:
         raise NotImplementedError()
@@ -217,6 +244,56 @@ class BandConfig:
         return writes
 
 
+class StateWatcher:
+    """
+    Polls the Hyperion's power state and active input, reporting each change. The first reading only sets the
+    baseline, and while the Hyperion cannot be reached the last known values are kept, so a change made in the meantime
+    is still reported once it is back.
+    """
+
+    def __init__(self, api: 'HyperionApi', interval: float, on_change: Callable[[str], None]):
+        self.__api = api
+        self.__interval = interval
+        self.__on_change = on_change
+        self.__stopped = threading.Event()
+        self.__thread = threading.Thread(target=self.__run, name='hyperion-autoclear', daemon=True)
+        self.__power: bool | None = None
+        self.__input: str | None = None
+
+    def start(self) -> None:
+        self.__thread.start()
+
+    def stop(self) -> None:
+        self.__stopped.set()
+        self.__thread.join(timeout=self.__interval + 5)
+
+    def __run(self) -> None:
+        unreachable = False
+        while not self.__stopped.is_set():
+            try:
+                self.poll()
+                if unreachable:
+                    logger.info('Hyperion is reachable again')
+                unreachable = False
+            except (requests.RequestException, HyperionError) as e:
+                if not unreachable:
+                    logger.warning(f'Unable to read the Hyperion state, will keep trying: {e}')
+                unreachable = True
+            self.__stopped.wait(self.__interval)
+
+    def poll(self) -> None:
+        power = self.__api.power_on()
+        active_input = self.__api.active_input()
+        changes = []
+        if self.__power is not None and power != self.__power:
+            changes.append('power state')
+        if self.__input is not None and active_input != self.__input:
+            changes.append('active input')
+        self.__power, self.__input = power, active_input
+        if changes:
+            self.__on_change(' and '.join(changes))
+
+
 class HyperionApi:
 
     def __init__(self, base_url: str, timeout: float):
@@ -242,6 +319,16 @@ class HyperionApi:
                 raise HyperionError(f'Hyperion has no speaker named {wanted}')
             ids.append(str(match['id']))
         return ids
+
+    def power_on(self) -> bool:
+        return str(self.__get('/v1/power').get('state')) == '1'
+
+    def active_input(self) -> str:
+        body = self.__get('/api/atlas/input/active')
+        value = body.get('inputId', body.get('input'))
+        if value is None:
+            raise HyperionError('Hyperion did not report its active input')
+        return str(value)
 
     def set_band(self, speaker_id: str, band: int, f: peqfit.Filter) -> None:
         payload = {
