@@ -719,8 +719,8 @@ AudioControl Hyperion APR-16 processors are supported via the processor's REST A
 * maxBoost: optional. If set, the response is never allowed to exceed this many dB; any boost an entry asks for beyond
   it is held at this level.
 * shelfBand: optional, defaults to 1. The Hyperion's low shelf band; set to `null` to leave it untouched.
-* peakBands: optional, defaults to every peaking band (2-7 and 9-16). Restrict this list to keep some bands for your
-  own use; ezbeq only ever changes the bands listed here and never changes band 8, the high shelf.
+* peakBands: optional, defaults to every peaking band (2-15). Restrict this list to keep some bands for your own use;
+  ezbeq only ever changes the bands listed here and never changes band 16, the high shelf.
 * maxFitError: optional, defaults to 1.5. An entry is refused, leaving the processor untouched, if it cannot be
   reproduced within this many dB.
 * timeout: optional, defaults to 10. Request timeout in seconds.

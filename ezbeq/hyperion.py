@@ -1,8 +1,8 @@
 """
 AudioControl Hyperion APR-16 support.
 
-Each Hyperion speaker has 16 parametric EQ bands: band 1 is a low shelf, band 8 a high shelf and the rest are peaking
-filters. BEQ entries often stack several low shelves at different frequencies, which that layout cannot hold, so the
+Each Hyperion speaker has 16 parametric EQ bands: band 1 is a low shelf, band 16 a high shelf and bands 2 to 15 are
+peaking filters. BEQ entries often stack several low shelves at different frequencies, which that layout cannot hold, so the
 entry's response is fitted onto the bands ezbeq is allowed to use (see ezbeq.peqfit) and written to every configured
 speaker through the Hyperion's REST API.
 """
@@ -28,7 +28,7 @@ logger = logging.getLogger('ezbeq.hyperion')
 SLOT_ID = 'Hyperion'
 DEFAULT_PORT = 8080
 LOW_SHELF_BAND = 1
-HIGH_SHELF_BAND = 8
+HIGH_SHELF_BAND = 16
 ALL_BANDS = range(1, 17)
 DEFAULT_PEAK_BANDS = [b for b in ALL_BANDS if b not in (LOW_SHELF_BAND, HIGH_SHELF_BAND)]
 
@@ -224,7 +224,7 @@ class BandConfig:
             raise ValueError(f'Hyperion shelfBand must be {LOW_SHELF_BAND} (the low shelf) or null')
         bad = [b for b in self.peaks if b not in ALL_BANDS or b in (LOW_SHELF_BAND, HIGH_SHELF_BAND)]
         if bad:
-            raise ValueError(f'Hyperion peakBands must be peaking bands (2-7, 9-16), not {bad}')
+            raise ValueError(f'Hyperion peakBands must be peaking bands (2-15), not {bad}')
         if len(set(self.peaks)) != len(self.peaks):
             raise ValueError('Hyperion peakBands contains duplicates')
         if self.shelf is None and not self.peaks:

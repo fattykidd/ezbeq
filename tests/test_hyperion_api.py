@@ -63,7 +63,14 @@ def test_load_writes_every_band_to_every_speaker(hyperion_client, httpserver):
     for speaker in ('4', '15'):
         assert sorted(w['eqId'] for w in writes if w['speakerId'] == speaker) == bands
     assert all(w['enabled'] is True for w in writes)
-    assert 8 not in {w['eqId'] for w in writes}, 'the high shelf band must never be touched'
+    assert 16 not in {w['eqId'] for w in writes}, 'the high shelf band must never be touched'
+
+
+def test_default_bands_match_the_hyperion_layout():
+    bands = BandConfig({})
+
+    assert bands.shelf == 1, 'band 1 is the low shelf'
+    assert bands.peaks == list(range(2, 16)), 'bands 2 to 15 are peaking filters; band 16 is the high shelf'
 
 
 def test_loaded_bands_reproduce_the_entry(hyperion_client, httpserver):
@@ -193,12 +200,12 @@ def test_unknown_speaker_name_fails_the_load(httpserver, tmp_path):
 
 def test_only_configured_bands_are_written(httpserver, tmp_path):
     writes = expect_band_writes(httpserver)
-    client = make_client(httpserver, tmp_path, shelfBand=None, peakBands=[9, 10, 11, 12, 13, 14, 15, 16])
+    client = make_client(httpserver, tmp_path, shelfBand=None, peakBands=[8, 9, 10, 11, 12, 13, 14, 15])
 
     r = load(client)
 
     assert r.status_code == 200
-    assert {w['eqId'] for w in writes} == {9, 10, 11, 12, 13, 14, 15, 16}
+    assert {w['eqId'] for w in writes} == {8, 9, 10, 11, 12, 13, 14, 15}
 
 
 def test_min_frequency_is_respected(httpserver, tmp_path):
@@ -213,7 +220,7 @@ def test_min_frequency_is_respected(httpserver, tmp_path):
 
 @pytest.mark.parametrize('band_cfg,message', [
     ({'shelfBand': 2}, 'shelfBand must be 1'),
-    ({'peakBands': [8]}, 'peakBands must be peaking bands'),
+    ({'peakBands': [16]}, 'peakBands must be peaking bands'),
     ({'peakBands': [1]}, 'peakBands must be peaking bands'),
     ({'peakBands': [17]}, 'peakBands must be peaking bands'),
     ({'peakBands': [2, 2]}, 'duplicates'),
