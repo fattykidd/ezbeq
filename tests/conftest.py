@@ -234,6 +234,19 @@ def stormaudio_client(stormaudio_app):
 
 
 @pytest.fixture
+def hyperion_app(httpserver: HTTPServer, tmp_path):
+    """Create and configure a new Hyperion app instance for each test."""
+    app, _ws = main.create_app(HyperionSpyConfig(httpserver.host, httpserver.port, tmp_path))
+    yield app
+
+
+@pytest.fixture
+def hyperion_client(hyperion_app):
+    """A test client for the app."""
+    return hyperion_app.test_client()
+
+
+@pytest.fixture
 def stub_app(tmp_path):
     """App instance using MinidspStubRunner - no hardware required."""
     app, _ws = main.create_app(StubConfig(tmp_path))
@@ -591,6 +604,49 @@ class StormAudioSpyConfig(Config):
                             }
                         }
                     }
+                }
+            }
+        }
+
+    @property
+    def config_path(self):
+        return self.__tmp_path
+
+    @property
+    def version(self):
+        return '1.2.3'
+
+    @property
+    def check_for_updates(self):
+        # Spy configs must never make live network calls to GitHub during tests.
+        return False
+
+
+class HyperionSpyConfig(Config):
+
+    def __init__(self, host: str, port: int, tmp_path, **device_cfg):
+        self.__host = host
+        self.__port = port
+        self.__tmp_path = tmp_path
+        self.__device_cfg = device_cfg
+        super().__init__('spy', beqcatalogue_url=f"http://{host}:{port}/")
+
+    @property
+    def load_catalogue_at_startup(self):
+        return True
+
+    def load_config(self):
+        return {
+            'debugLogging': False,
+            'accessLogging': False,
+            'port': 8080,
+            'devices': {
+                'master': {
+                    'type': 'hyperion',
+                    'url': f"http://{self.__host}:{self.__port}",
+                    'speakers': [4, 15],
+                    'timeout': 5,
+                    **self.__device_cfg,
                 }
             }
         }

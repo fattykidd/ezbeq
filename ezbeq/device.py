@@ -285,6 +285,9 @@ def _device_class_for_type(d_type: str) -> type[Device]:
     elif d_type == 'stormaudio':
         from ezbeq.stormaudio import StormAudio
         return StormAudio
+    elif d_type == 'hyperion':
+        from ezbeq.hyperion import Hyperion
+        return Hyperion
     elif d_type == 'jriver':
         from ezbeq.jriver import JRiver
         return JRiver

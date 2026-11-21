@@ -2,7 +2,7 @@
 
 A simple web browser for [beqcatalogue](https://beqcatalogue.readthedocs.io/en/latest/) which integrates
 with [minidsp-rs](https://github.com/mrene/minidsp-rs)
-for local remote control of a minidsp, HTP-1, StormAudio processor or other supported DSP.
+for local remote control of a minidsp, HTP-1, StormAudio processor, AudioControl Hyperion or other supported DSP.
 
 A companion [mobile app](#mobile-app) (iOS/iPadOS + Android) is also available, covering the main
 BEQ workflow against an existing ezbeq server.
@@ -39,6 +39,7 @@ Full documentation, including this README, is also published at
       - [Device-optimised filters](#device-optimised-filters)
     - [Monolith HTP1](#monolith-htp1)
     - [StormAudio](#stormaudio)
+    - [AudioControl Hyperion](#audiocontrol-hyperion)
     - [JRiver Media Center](#jriver-media-center)
     - [Q-Sys](#q-sys)
     - [CamillaDSP](#camilladsp)
@@ -121,6 +122,7 @@ See [examples](examples)
 | Monolith HTP-1              | [ezbeq_htp1.yml](examples/ezbeq_htp1.yml)                                                                                                                                   |
 | Q-Sys                       | [ezbeq_qsys.yml](examples/ezbeq_qsys.yml)                                                                                                                                   |
 | StormAudio                  | [ezbeq_stormaudio.yml](examples/ezbeq_stormaudio.yml)                                                                                                                       |
+| AudioControl Hyperion       | [ezbeq_hyperion.yml](examples/ezbeq_hyperion.yml)                                                                                                                           |
 | Multiple, different devices | [ezbeq_multi.yml](examples/ezbeq_multi.yml)                                                                                                                                 |
 | Composite (grouped) devices | [ezbeq_composite.yml](examples/ezbeq_composite.yml)                                                                                                                         |
 
@@ -691,6 +693,41 @@ Requires StormAudio firmware 4.7r2 or newer.
 
 Loading a filter creates a StormAudio profile from the current processor state. ezbeq does not activate or delete
 StormAudio profiles; clearing the ezbeq slot only clears ezbeq's local state.
+
+#### AudioControl Hyperion
+
+AudioControl Hyperion APR-16 processors are supported via the processor's REST API.
+
+```
+  hyperion:
+    ip: 192.0.2.20
+    speakers:
+    - Sub 1
+    - Sub 2
+    minFrequency: 5
+    type: hyperion
+```
+
+* ip: ip address of the Hyperion. The API port defaults to 8080; use `url` (e.g. `http://192.0.2.20:8080`) to set it
+  explicitly.
+* speakers: the speakers to load BEQ into, by name (as shown in the Hyperion's speaker setup, or its custom name) or by
+  speaker id. The ids are listed by `http://<ip>:8080/v1/speakerstate`.
+* minFrequency: optional, defaults to 5. The lowest frequency, in Hz, that the BEQ response is reproduced down to and
+  that any filter is placed at. Set it to suit your subwoofers, e.g. around the tuning frequency of ported subwoofers
+  or above a subsonic filter in the amplifier, so that no bands are spent on boost the system cannot play.
+* maxBoost: optional. If set, the response is never allowed to exceed this many dB; any boost an entry asks for beyond
+  it is held at this level.
+* shelfBand: optional, defaults to 1. The Hyperion's low shelf band; set to `null` to leave it untouched.
+* peakBands: optional, defaults to every peaking band (2-7 and 9-16). Restrict this list to keep some bands for your
+  own use; ezbeq only ever changes the bands listed here and never changes band 8, the high shelf.
+* maxFitError: optional, defaults to 1.5. An entry is refused, leaving the processor untouched, if it cannot be
+  reproduced within this many dB.
+* timeout: optional, defaults to 10. Request timeout in seconds.
+
+Each Hyperion speaker has a single low shelf and up to 14 peaking bands, while many BEQ entries stack several low
+shelves at different frequencies. ezbeq therefore does not copy an entry filter by filter: it fits the entry's combined
+response onto the available bands, typically to within a few tenths of a dB, and writes the result to every listed
+speaker. Entries which already fit the layout are written as they are. Clearing the slot sets every listed band flat.
 
 #### JRiver Media Center
 

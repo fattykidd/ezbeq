@@ -1,0 +1,11 @@
+accessLogging: false
+debugLogging: true
+devices:
+  hyperion:
+    ip: 192.0.2.20
+    speakers:
+    - Sub 1
+    - Sub 2
+    minFrequency: 5
+    type: hyperion
+port: 8080
